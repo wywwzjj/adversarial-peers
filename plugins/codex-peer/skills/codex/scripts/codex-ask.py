@@ -53,9 +53,7 @@ def main():
     except OSError as exc:
         return report_failure(details, stderr_path, f'codex exec failed: {exc}', 4)
 
-    if rc != 0:
-        return report_failure(details, stderr_path, f'codex exited {rc}; answer withheld (see DETAILS)', 3)
-
+    child_failure = f'codex exited {rc}; answer withheld (see DETAILS)'
     sid = last = None
     try:
         with events_path.open(encoding='utf-8', errors='replace') as events:
@@ -64,9 +62,18 @@ def main():
                 if not isinstance(e, dict):
                     raise ValueError('expected a JSON object')
                 if e.get('type') in ('error', 'turn.failed'):
+                    summary = 'codex reported an error'
+                    if rc != 0:
+                        summary += f' (exit {rc})'
+                    for value in (e.get('error'), e.get('message')):
+                        if isinstance(value, dict):
+                            value = value.get('message')
+                        if isinstance(value, str) and value.strip():
+                            summary += f': {value.strip()}'
+                            break
                     return report_failure(
                         details, stderr_path,
-                        'codex reported an error; answer withheld (see events.jsonl in DETAILS)', 3,
+                        f'{summary}; answer withheld (see events.jsonl in DETAILS)', 3,
                     )
                 if e.get('type') == 'thread.started':
                     sid = e.get('thread_id')
@@ -77,8 +84,12 @@ def main():
                     if item.get('type') == 'agent_message':
                         last = item.get('text')
     except (OSError, ValueError) as exc:
+        if rc != 0:
+            return report_failure(details, stderr_path, child_failure, 3)
         return report_failure(details, stderr_path, f'malformed event stream: {exc} (see DETAILS)', 4)
 
+    if rc != 0:
+        return report_failure(details, stderr_path, child_failure, 3)
     if not isinstance(last, str) or not last.strip():
         return report_failure(details, stderr_path, 'no final agent message (see DETAILS)', 3)
     if not isinstance(sid, str) or not sid.strip():

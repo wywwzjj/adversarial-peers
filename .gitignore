@@ -40,5 +40,6 @@ out/
 # Claude local settings
 .claude/
 
-# Python test caches
+# Python bytecode and test caches
 __pycache__/
+*.py[cod]

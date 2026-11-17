@@ -64,7 +64,7 @@ pathlib.Path(os.environ['PEER_TEST_CAPTURE']).write_text(json.dumps({
     'argv': sys.argv[1:], 'stdin': stdin, 'cwd': os.getcwd(),
 }))
 sys.stdout.write(rest)
-sys.stderr.write('fake peer diagnostic\\n')
+sys.stderr.write(os.environ.get('PEER_TEST_STDERR', 'fake peer diagnostic\\n'))
 sys.exit(int(os.environ['PEER_TEST_EXIT']))
 ''')
             fake.chmod(0o755)
@@ -210,6 +210,37 @@ sys.exit(int(os.environ['PEER_TEST_EXIT']))
                 output = json.dumps({'type': 'thread.started', 'thread_id': 'session-1'}) + '\n'
                 output += json.dumps({'type': 'item.completed', 'item': item})
                 self.assert_failure(self.run_peer('codex', output=output))
+
+    def test_codex_reports_event_error_when_child_stderr_is_empty(self):
+        self.env['PEER_TEST_STDERR'] = ''
+        cases = (
+            ({'type': 'error', 'message': 'connection failed'}, 'connection failed'),
+            ({'type': 'turn.failed', 'error': {'message': 'quota exceeded'}}, 'quota exceeded'),
+            ({'type': 'turn.failed', 'error': 'request rejected'}, 'request rejected'),
+            ({'type': 'turn.failed', 'error': {'code': 123}}, 'codex reported an error'),
+        )
+        for status in (0, 7):
+            for event, message in cases:
+                with self.subTest(status=status, event=event):
+                    output = success('codex') + json.dumps(event) + '\n'
+                    result = self.run_peer('codex', status=status, output=output)
+                    self.assertEqual(result.returncode, 3, result.stderr)
+                    self.assertIn(message, result.stderr)
+                    self.assertNotIn('ANSWER', result.stdout)
+                    self.assertNotIn('SESSION_ID=', result.stdout)
+                    self.assertNotIn('Traceback', result.stderr)
+                    details = self.details(result)
+                    self.assertEqual((details / 'stderr.log').read_text(), '')
+                    self.assertEqual((details / 'events.jsonl').read_text(), output)
+
+    def test_codex_nonzero_exit_keeps_child_failure_code_for_unusable_stream(self):
+        for output in ('not JSON', '[]', success('codex') + '{"type":"turn.failed"'):
+            with self.subTest(output=output):
+                result = self.run_peer('codex', status=7, output=output)
+                self.assert_failure(result)
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertIn('codex exited 7', result.stderr)
+                self.assertEqual((self.details(result) / 'events.jsonl').read_text(), output)
 
     def test_claude_structured_error_does_not_traceback(self):
         output = json.dumps({'is_error': True, 'result': {'message': 'failed'}})

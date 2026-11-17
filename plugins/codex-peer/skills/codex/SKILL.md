@@ -55,7 +55,7 @@ Recover a lost ID from `DETAILS/events.jsonl` (`thread.started.thread_id`). Only
 
 ## Results and failures
 
-Success returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>`; failure returns nonzero without an answer or ID. Save the ID for follow-ups. Read logs for failures, ID recovery, or user requests. `DETAILS` contains `events.jsonl` and `stderr.log`; failures show the last 40 stderr lines.
+Success returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>`; failure returns nonzero without an answer or ID. Save the ID for follow-ups. Read logs for failures, ID recovery, or user requests. `DETAILS` contains `events.jsonl` and `stderr.log`; failures show the error message from an `error` / `turn.failed` event when available, followed by the last 40 stderr lines.
 
 - Exit 3: child failure, error event, or no final answer. Exit 4: malformed events or missing thread ID. Inspect `DETAILS`.
 - `Not inside a trusted directory`: run in the repository or pass `--skip-git-repo-check`.
