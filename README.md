@@ -1,311 +1,153 @@
-# cc-skill-codex
+# adversarial-peers
 
-A dual-direction peer-agent marketplace: **two plugins** that let Claude Code and OpenAI Codex CLI call each other as peer coding agents. Neither skill pins a model — each uses whatever the callee CLI is configured to default to.
+Peer coding agents for adversarial / steerable review, design discussion, debugging, and delegated implementation. The three plugins provide the same responsibilities through different agents:
 
-| Plugin | Direction | Install into | Skill |
-|--------|-----------|--------------|-------|
-| `cc-skill-codex` | Claude → Codex (`codex exec`) | Claude Code | `codex` |
-| `codex-skill-claude` | Codex → Claude (`claude -p`) | Codex CLI | `claude` |
+| Plugin | Agent | CLI | Skill |
+|--------|-------|-----|-------|
+| `codex-peer` | Codex | `codex exec` | `codex` |
+| `cc-peer` | Claude Code | `claude -p` | `claude` |
+| `agy-peer` | Antigravity / Gemini | `agy --print` | `agy` |
 
-**Positioning** (both directions): the callee is a peer coding agent. Strongest fit is **adversarial / steerable code review**; also useful for standard review, deep design analysis, debugging investigations, and delegated tasks. Both agents can read and write code — pick by task fit, not by role.
+Choose the agent explicitly, then choose the workflow by task fit. Each agent uses its configured model, reasoning effort, and permissions unless the user requests an override.
 
-**Verified versions**: Codex CLI v0.142.2 (skill commands) / v0.145.0 (plugin install); Claude Code v2.1.206.
+## Installation
 
-## What is this?
+Install the CLI for the agent you want to call, authenticate it, and have `python3` on PATH. The host loads the skill and runs its bundled wrapper.
 
-One repository serves both ecosystems: Codex CLI's plugin system reads Claude's `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` directly, so the same marketplace installs into either agent. The two directions are **separate plugins** on purpose — an installed plugin loads *all* its skills into the host agent, so bundling both skills in one plugin would give each agent a wrong-direction skill.
+- Codex: `codex --version`, `codex login`; the wrapper requires `codex exec --json` (verified on v0.145.0).
+- Claude Code: `claude --version`; run `claude` interactively once to authenticate.
+- Antigravity: `agy --version`; run `agy` interactively once to sign in. The wrapper requires `stream-json` input/output support (verified on v1.5.9 / v1.5.10).
 
-- **Marketplace name**: `cc-skill-codex-marketplace`
-- **For Claude Code users**: install `cc-skill-codex@cc-skill-codex-marketplace` → get the `codex` skill
-- **For Codex CLI users**: install `codex-skill-claude@cc-skill-codex-marketplace` → get the `claude` skill
+Choose a plugin from the table and replace `<plugin>` in the commands below with its name.
 
-> Known limitation: both hosts can *see* both plugins in the marketplace listing — nothing enforces the pairing. Installing the wrong direction (e.g. `codex-skill-claude` into Claude Code) gives the host a skill for calling *itself* — unsupported, and a self-call could recurse or burn tokens pointlessly. Install only your own direction.
+### Codex CLI
 
-## Repository Structure
-
-```
-cc-skill-codex-marketplace/          # Marketplace root (served to both agents)
-├── .claude-plugin/
-│   └── marketplace.json             # Marketplace configuration: lists both plugins
-├── plugins/
-│   ├── cc-skill-codex/              # Claude → Codex plugin
-│   │   ├── .claude-plugin/plugin.json
-│   │   └── skills/codex/
-│   │       ├── SKILL.md             # Loaded by Claude Code
-│   │       └── scripts/codex-ask.sh # Wrapper: answer + SESSION_ID + DETAILS
-│   └── codex-skill-claude/          # Codex → Claude plugin
-│       ├── .claude-plugin/plugin.json
-│       └── skills/claude/
-│           ├── SKILL.md             # Loaded by Codex CLI
-│           └── scripts/claude-ask.sh # Wrapper: answer + SESSION_ID + DETAILS
-├── README.md                        # This file - installation and usage guide
-└── LICENSE                          # Apache 2.0 license
-```
-
-**How it works**:
-1. You add the **marketplace** (`cc-skill-codex-marketplace`) from GitHub — in Claude Code *or* Codex CLI
-2. You install the **plugin for your direction** (`cc-skill-codex` or `codex-skill-claude`)
-3. The plugin provides the **skill** (`codex` or `claude`)
-4. The host agent loads the plugin's `SKILL.md` when the skill is invoked
-5. Each `SKILL.md` is the primary maintained documentation surface for its direction
-
----
-
-## Installation in Codex CLI (codex-skill-claude)
-
-Prerequisites: Claude Code installed and authenticated (`claude --version`; run `claude` once interactively to log in), Codex CLI v0.145+ (for `codex plugin`), `python3` on PATH (used by the wrapper script to parse Claude's JSON output).
+Requires a Codex version with plugin support (`codex plugin --help`; installation and skill discovery tested on v0.169.0).
 
 ```bash
-# 1. Add the marketplace
-codex plugin marketplace add wywwzjj/cc-skill-codex
-
-# 2. Install the plugin
-codex plugin add codex-skill-claude@cc-skill-codex-marketplace
-
-# Verify / manage
+codex plugin marketplace add wywwzjj/adversarial-peers
+codex plugin add <plugin>@adversarial-peers
 codex plugin list
-codex plugin remove codex-skill-claude@cc-skill-codex-marketplace   # full id required
 ```
 
-Then, in Codex: *"Use Claude to challenge the caching design in src/api/client.ts"*. The skill invokes Claude through its wrapper script (`claude-ask.sh`), which prints only the answer plus `SESSION_ID=`/`DETAILS=` trailer lines and persists the full JSON envelope and stderr for on-demand inspection. Claude runs with its own configured defaults — the skill imposes no tool or permission restrictions. See `plugins/codex-skill-claude/skills/claude/SKILL.md` for the full workflow.
+### Claude Code
 
-> Heads-up: `claude -p` needs network access and writes session state to `~/.claude` — if your Codex session runs in a sandbox that blocks either, run Codex with network enabled for these commands.
+```text
+/plugin marketplace add wywwzjj/adversarial-peers
+/plugin install <plugin>@adversarial-peers
+```
 
----
+You can also use `/plugin` to browse and manage plugins interactively, or install an individual skill via the open Agent Skills CLI (`npx skills add wywwzjj/adversarial-peers --skill <codex|claude|agy> -g`).
 
-## Installation in Claude Code (cc-skill-codex)
+### Updates and migration
 
-### Prerequisites
-
-1. **Codex CLI** installed and authenticated:
-   ```bash
-   codex --version  # v0.145+ recommended (wrapper script uses `codex exec --json`; v0.142 works via the SKILL.md inline fallback)
-   codex login
-   ```
-
-2. **Claude Code** installed and running
-
-3. **python3** on PATH (used by the wrapper script to parse the Codex event stream)
-
-### Installation Methods
-
-#### Method 1: Interactive Menu (Recommended)
-
-1. Add the marketplace to Claude Code:
-   ```bash
-   /plugin marketplace add wywwzjj/cc-skill-codex
-   ```
-
-2. Open plugin management:
-   ```bash
-   /plugin
-   ```
-
-3. Select **"Browse Plugins"** to view available plugins
-
-4. Find and select **cc-skill-codex**
-
-5. Choose the installation option
-
-#### Method 2: Direct Command
+In Codex, refresh the marketplace and re-add the selected plugin to refresh its cached version:
 
 ```bash
-# 1. Add the marketplace
-/plugin marketplace add wywwzjj/cc-skill-codex
-
-# 2. Install the plugin
-/plugin install cc-skill-codex@cc-skill-codex-marketplace
+codex plugin marketplace upgrade adversarial-peers
+codex plugin add <plugin>@adversarial-peers
 ```
 
-### Upgrading from v3.2.x or earlier
+Removal uses the full identifier: `codex plugin remove <plugin>@adversarial-peers`. Check the installed `codex plugin --help` for version-specific details.
 
-v3.3.0 moved the plugin from the repository root into `plugins/cc-skill-codex/` (to make room for the second plugin). Marketplace-based installs migrate via the normal update path:
+In Claude Code:
+
+```text
+/plugin marketplace update adversarial-peers
+/plugin update <plugin>@adversarial-peers
+```
+
+Reload the host session's skill catalog after installation or updates. Editing a marketplace checkout does not update an installed plugin cache.
+
+**Migrating from `cc-skill-codex` / `cc-skill-codex-marketplace`**: the repository and marketplace were renamed to `adversarial-peers`, and plugins were unified to `<agent>-peer` (`cc-skill-codex` → `codex-peer`, `codex-skill-claude` → `cc-peer`, plus `agy-peer`). Remove the old plugin and marketplace entry, add `wywwzjj/adversarial-peers`, and install `<plugin>@adversarial-peers` (for direct `--plugin-dir` usage, point to `plugins/<plugin>`).
+
+## Usage
+
+All three agents support the same workflows. These examples use different agents to illustrate selection; each workflow is available with any of them.
+
+| Workflow | Example request |
+|----------|-----------------|
+| Adversarial / steerable review | “Use Codex to challenge the caching design — focus on races and rollback gaps.” |
+| Standard review | “Use Claude to review auth.py for bugs and security issues.” |
+| Design analysis | “Ask agy to compare approaches for a multi-tenant rate limiter.” |
+| Debug investigation | “Use Codex to trace why the queue deadlocks under concurrency.” |
+| Delegated implementation | “Have Claude fix the deadlock and verify the change.” |
+
+Adversarial review is the flagship workflow: name a specific design choice or risk area for the peer to challenge. For a diff-scoped review, name the scope, such as “uncommitted changes” or “the diff against main”; the peer collects the diff itself.
+
+The skill activates only when the user selects the agent, directly invokes the skill, or clearly continues an existing call. A generic review request, a mention of an agent as a topic, or an ambiguous “continue” does not choose a peer.
+
+Give the peer the target, context, constraints, expected output, and whether edits are authorized. Review and investigation requests return findings without changing files. An implementation request authorizes the peer to make the requested changes and verify them. The caller assesses the result and reports material uncertainty.
+
+### Continue a session
+
+A follow-up such as “Continue that review — also check rollback under partial failure” resumes the selected peer's prior session by its captured ID. Sessions persist across host restarts. Keep the ID with the agent identity so another plugin's session is never resumed by mistake.
+
+| Agent | Resume selector | Model / effort on resume | Saved ID |
+|-------|-----------------|--------------------------|----------|
+| Codex | `resume <SESSION_ID>` | Inherits the session's model and reasoning effort | `events.jsonl`: `thread.started.thread_id` |
+| Claude Code | `--resume <SESSION_ID>` | Inherits the model; pass effort explicitly to override | `envelope.json`: `session_id` |
+| Antigravity | `--conversation <SESSION_ID>` | Re-pass explicit model / effort overrides | `envelope.json`: `conversation_id` |
+
+Recover a missing ID from the prior call's `DETAILS` directory. Most-recent selectors (`--last` / `--continue`) are last resorts because they can select another concurrent call. The agy wrapper verifies the requested ID in the same process before sending the resumed task; an unknown ID or unsupported handshake fails without sending it.
+
+### Results and permissions
+
+Every wrapper returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>` on success. Full output and stderr stay in the details directory for inspection when needed. Failed calls return a nonzero exit status and withhold the answer and session ID; logs remain available. See each skill for its CLI-specific error codes.
+
+The wrappers add no model, effort, sandbox, or tool restrictions. Agents need network access and access to their local state directories, such as `~/.codex`, `~/.claude`, or `~/.gemini`. Use the host's normal permission flow and the user's configured environment.
+
+## Skill paths
+
+All examples use `<skill-dir>` for the absolute directory containing the loaded `SKILL.md`. Resolve any supplied Skill roots alias first and use that installed copy, including versioned cache paths and paths containing spaces. Do not guess from the working directory or depend on a skill-directory environment variable.
+
+Codex v0.169.0 does not supply `CODEX_SKILL_DIR` / `CLAUDE_SKILL_DIR` or substitute them in skill text. Plugin-hook variables are a separate mechanism. Earlier verification used the installed binary and pinned upstream [skill loading](https://github.com/openai/codex/blob/7fb4014d52b5bc5049c389f9df015ff8c7e6e37c/codex-rs/ext/skills/src/host_prompt.rs) and [hook discovery](https://github.com/openai/codex/blob/7fb4014d52b5bc5049c389f9df015ff8c7e6e37c/codex-rs/hooks/src/engine/discovery.rs).
+
+## Repository structure
+
+```text
+.claude-plugin/marketplace.json
+plugins/
+├── codex-peer/
+│   ├── .claude-plugin/plugin.json
+│   └── skills/codex/
+│       ├── SKILL.md
+│       └── scripts/codex-ask.py
+├── cc-peer/
+│   ├── .claude-plugin/plugin.json
+│   └── skills/claude/
+│       ├── SKILL.md
+│       └── scripts/claude-ask.py
+└── agy-peer/
+    ├── .claude-plugin/plugin.json
+    └── skills/agy/
+        ├── SKILL.md
+        └── scripts/agy-ask.py
+tests/
+├── test_peer_wrappers.py
+└── test_agy_ask.py
+```
+
+Each `SKILL.md` is the authoritative workflow reference for that agent's invocation, resume rules, and common errors. The marketplace provides one plugin per agent using the same manifest layout.
+
+## Verification
+
+Run the wrapper regression suite without calling a model:
 
 ```bash
-/plugin marketplace update cc-skill-codex-marketplace
-/plugin update cc-skill-codex@cc-skill-codex-marketplace
+python3 -m unittest discover -s tests -v
 ```
 
-If you loaded the plugin by pointing directly at the repository root (e.g. `--plugin-dir <repo>`), update the path to `<repo>/plugins/cc-skill-codex`.
+The 48 tests cover the shared success/failure contract, literal and large-payload prompt forwarding, configured defaults and explicit overrides, log preservation, pre- and post-init error envelopes, malformed/empty output, and nonzero child exits. agy-specific tests also cover single-file layout, pre-send resume-ID validation, malformed/missing handshakes, argument conflicts, missing-value rejection, inherited stdout with and without a final result, concurrent large input/output, error-result preservation after a broken stdin, closing stdin for pre-init errors, process-group cleanup after result-validation failures, bounded exit cleanup, SIGINT/SIGTERM process-group cleanup, and proof that a mismatched session receives no task. Tests use fake CLIs and installed-style paths containing spaces, without host path variables.
 
-### Verify Installation
+agy reviews can be slow: a live review with the configured High model completed nine minutes after resuming. Allow long tasks to finish and use background execution when foreground tools have short timeouts. Several minutes without output is not evidence of a hang; the wrapper adds no overall reasoning deadline.
 
-After installation, verify the skill is working:
+Live checks on 2026-11-17 installed `agy-peer` with Codex v0.169.0 in an isolated `CODEX_HOME`, discovered its cached skill, and verified fresh turns, resumed turns, invalid-ID rejection (Exit 5 before sending the task), and pre-init error classification (Exit 3) against agy v1.5.9 / v1.5.10.
 
-```
-> Use Codex to design a binary search tree in Rust
-```
+**Previously verified CLIs**: Codex v0.142.2 / v0.145.0 for base commands and JSON events, v0.169.0 for plugin installation/discovery; Claude Code v2.1.206; agy v1.5.5 for original behavior checks and v1.5.9 / v1.5.10 for stream-json invocation and resume. For other versions, consult the CLI's own help.
 
-The skill will invoke Codex CLI using whatever model your Codex CLI is configured to default to.
+**Plugin versions**: codex-peer 1.0.0 · cc-peer 1.0.0 · agy-peer 1.0.0
 
----
-
-## Step-by-Step Tutorial
-
-### Step 1: Install Prerequisites
-
-```bash
-# Check if Codex CLI is installed
-codex --version  # v0.142+ recommended
-
-# If not installed, follow OpenAI's installation instructions
-# https://developers.openai.com/codex/cli/installation
-
-# Authenticate with your OpenAI account
-codex login
-```
-
-### Step 2: Add the Marketplace
-
-Add the GitHub marketplace to Claude Code:
-
-```bash
-/plugin marketplace add wywwzjj/cc-skill-codex
-```
-
-This registers the marketplace so Claude Code knows where to find the plugin.
-
-### Step 3: Install the Plugin
-
-**Option A: Interactive Menu (Recommended)**
-
-1. Open plugin management:
-   ```bash
-   /plugin
-   ```
-
-2. Select "Browse Plugins"
-
-3. Find "cc-skill-codex" and install it
-
-**Option B: Direct Command**
-
-```bash
-/plugin install cc-skill-codex@cc-skill-codex-marketplace
-```
-
-**Note**: The full identifier is `cc-skill-codex@cc-skill-codex-marketplace` where:
-- `cc-skill-codex` = plugin name
-- `cc-skill-codex-marketplace` = marketplace name (from marketplace.json)
-
-### Step 4: Verify Installation
-
-Check the plugin is installed:
-```bash
-/plugin
-```
-
-Select "Manage Plugins" to see cc-skill-codex in your list.
-
-### Step 5: Use Codex for Adversarial / Steerable Review (Flagship)
-
-The strongest reason to reach for Codex: pressure-test a design rather than nitpick lines.
-
-**Adversarial review request**:
-```
-> Use Codex to challenge the caching/retry design in src/api/client.ts — pressure-test for race conditions and rollback gaps
-```
-
-Codex will:
-1. Execute `codex exec` (via the wrapper script) with a steered prompt that explicitly asks it to challenge the design, surface hidden assumptions, and identify failure modes
-2. Return concrete risks (race conditions, data loss paths, auth weaknesses, reliability cliffs) with reasoning
-3. Often suggest where a different design would have been safer or simpler
-
-**Why this is the flagship**: an independent agent challenging your design catches what an in-the-flow reviewer misses. Steer it at a specific risk area for best results — generic "review this" is much weaker than "challenge whether retries belong in this layer".
-
-### Step 6: Use Codex for Standard Code Review or Design Analysis
-
-**Standard review request**:
-```
-> Use Codex to review auth.py for security issues
-```
-
-**Design analysis request**:
-```
-> Use Codex to analyze approaches for a multi-tenant rate limiter
-```
-
-Codex returns its findings; you (or Claude) decide what to do with them. Codex can also be delegated the fix directly when appropriate — see Step 8.
-
-### Step 7: Continue a Session
-
-**Follow-up request** (continuing the adversarial review from Step 5):
-```
-> Continue that review — also pressure-test the rollback path under partial failure
-```
-
-Codex will:
-1. Resume the prior session **by ID** (not `--last`): `bash "${CLAUDE_SKILL_DIR}/scripts/codex-ask.sh" resume <SESSION_ID> "Pressure-test the rollback path under partial failure"`
-2. Resume with full context from the previous session — same target code, same prior reasoning
-3. Build on what was already challenged rather than starting over
-
-**Why ID-based resume matters**: `--last` resumes the most recent Codex session and races with any other Codex call (parallel reviews, the user invoking Codex directly, background tasks). The wrapper script prints a `SESSION_ID=<id>` line after every successful run — taken from the structured `thread.started` event, not scraped from stderr text — and that ID stays in Claude's context for follow-ups. If it ever scrolls out of context, it's still recoverable from the run's `DETAILS` directory (`events.jsonl`); `--last` is the final fallback.
-
-**Why session continuation matters**: Codex sessions persist across Claude Code restarts. Multi-day reviews and investigations stay coherent — you can resume days later with full prior context.
-
-### Step 8: Debug Investigation or Delegated Task
-
-**Debug investigation**:
-```
-> Use Codex to investigate why my queue implementation deadlocks under high concurrency
-```
-
-Codex will trace the bug end-to-end and propose root cause + fix. You can then apply the fix yourself (with Claude) for tight control.
-
-**Delegated task** (Codex actually writes the patch):
-```
-> Have Codex fix the deadlock in queue.py — apply the smallest safe patch
-```
-
-When the user clearly says "have Codex fix" or "let Codex patch", let Codex own the change. Whether Codex may write is governed by your configured sandbox in `~/.codex/config.toml` — the skill doesn't override it.
-
-**Tradeoff**: investigation-then-apply gives Claude/you full control over the patch; a delegated fix is faster but Codex picks the implementation. Pick by how much you trust the local context vs. value the speed.
-
----
-
-## Quick Tips
-
-### Workflow Pattern
-- **Adversarial / steerable review** is the flagship — challenge designs, pressure-test tradeoffs, find hidden risks
-- **No restriction flags** — the skill passes no `-s`; Codex runs with the sandbox configured in your `~/.codex/config.toml`. Pass `-s` yourself only when you want a specific mode for a specific call
-- **Pick by task fit, not by role** — both Codex and Claude can read and write code
-
-### Triggering the Skill
-- **Explicit**: "Use Codex to challenge...", "Use Codex to pressure-test...", "Use Codex to review..."
-- **Keywords**: Mention "Codex" to explicitly trigger the skill
-- **Steered**: For adversarial reviews, name the risk area — "challenge the retry design", "look for race conditions in the connection pool". Generic asks underperform focused ones.
-
-### Model Usage
-- **Model**: The skill does not pin a model — Codex CLI's current default is used (whichever model your installed Codex version ships with). To override, pass `-m <model>`.
-- **Reasoning effort**: New sessions use `model_reasoning_effort=high` by default; resumed sessions inherit the original session's model + reasoning effort.
-
-### Session Continuation
-- **Keywords**: "continue", "resume", "add to that", "keep going"
-- **Persistence**: Sessions survive Claude Code restarts
-- **Long-term context**: Resume projects days or weeks later with full history
-
-### Common Use Cases
-| Task | Use Codex? | Example |
-|------|-----------|---------|
-| **Adversarial / steerable review** | ✅ Strongest fit | "Challenge the caching design — find race conditions" |
-| Standard code review | ✅ Yes | "Use Codex to review auth.py for security" |
-| Design / architecture analysis | ✅ Yes | "Use Codex to analyze rate-limiter approaches" |
-| Debug investigation | ✅ Yes | "Use Codex to trace why this deadlocks" |
-| Delegated fix / refactor | ✅ When delegated explicitly | "Have Codex apply the smallest safe patch" |
-| Quick edit you can do yourself | ❌ Skip | Just have Claude do it |
-
----
-
-## Documentation
-
-For the plugin docs, see:
-- `plugins/cc-skill-codex/skills/codex/SKILL.md` - Claude → Codex: skill definition, command patterns, and common failure guidance
-- `plugins/codex-skill-claude/skills/claude/SKILL.md` - Codex → Claude: skill definition, command patterns, and common failure guidance
-
----
+**Runtime dependency**: `python3`
 
 **License**: Apache 2.0
-**Versions**: cc-skill-codex 3.3.1 · codex-skill-claude 1.0.1
-**Codex CLI**: v0.145+ recommended (`codex plugin`, `codex exec --json`); base commands verified on v0.142.2 · **Claude Code**: verified on v2.1.206
-**Runtime dependency**: `python3` on PATH (both wrapper scripts)
-**Positioning**: peer coding agents in both directions — flagship use case is adversarial / steerable code review.

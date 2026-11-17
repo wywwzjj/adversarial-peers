@@ -1,19 +1,24 @@
 {
-  "name": "cc-skill-codex-marketplace",
-  "description": "Dual-direction peer-agent skills: Claude Code invokes Codex CLI (cc-skill-codex) and Codex CLI invokes Claude Code (codex-skill-claude). Flagship use case: adversarial / steerable code review.",
+  "name": "adversarial-peers",
+  "description": "Peer-agent skills for Codex, Claude Code, and Antigravity (agy). Invoke only when the user selects the peer.",
   "owner": {
     "name": "wywwzjj"
   },
   "plugins": [
     {
-      "name": "cc-skill-codex",
-      "source": "./plugins/cc-skill-codex",
-      "description": "For Claude Code: invoke Codex CLI as a peer coding agent — adversarial code review, design analysis, debugging, delegated tasks."
+      "name": "codex-peer",
+      "source": "./plugins/codex-peer",
+      "description": "Call Codex when explicitly requested, or resume an existing Codex call."
     },
     {
-      "name": "codex-skill-claude",
-      "source": "./plugins/codex-skill-claude",
-      "description": "For Codex CLI: invoke Claude Code as a peer coding agent — adversarial code review, design analysis, debugging, delegated tasks."
+      "name": "cc-peer",
+      "source": "./plugins/cc-peer",
+      "description": "Call Claude Code when explicitly requested, or resume an existing Claude call."
+    },
+    {
+      "name": "agy-peer",
+      "source": "./plugins/agy-peer",
+      "description": "Call Antigravity (agy / Gemini) when explicitly requested, or resume an existing agy call."
     }
   ]
 }

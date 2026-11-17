@@ -39,3 +39,6 @@ out/
 
 # Claude local settings
 .claude/
+
+# Python test caches
+__pycache__/
