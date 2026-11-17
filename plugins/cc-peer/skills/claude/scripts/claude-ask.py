@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Single-file wrapper for `claude -p --output-format json` used by the claude skill.
 
-Prints ONLY: the result text, a SESSION_ID=<id> line, and a DETAILS=<dir>
+Stdout prints ONLY: the result text, a SESSION_ID=<id> line, and a DETAILS=<dir>
 line. The full JSON envelope (`envelope.json`: usage, cost, permission_denials,
 model info) and `stderr.log` are persisted in DETAILS for on-demand inspection
-instead of flooding context.
+instead of flooding context. Stderr announces DETAILS before launch.
 
 Usage (flags pass through to `claude -p` verbatim):
     python3 claude-ask.py <<'PEER_PROMPT_END'
@@ -22,6 +22,7 @@ Failed calls emit neither an answer nor SESSION_ID.
 Requires: Claude Code CLI (verified v2.1.206), Python 3.9+.
 """
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -41,12 +42,14 @@ def report_failure(details, stderr_path, message, code):
 
 
 def main():
-    details = Path(tempfile.mkdtemp(prefix='claude-ask.'))
+    details = Path(tempfile.mkdtemp(prefix='claude-ask.', dir='/tmp' if os.name == 'posix' else None))
     envelope_path = details / 'envelope.json'
     stderr_path = details / 'stderr.log'
 
     try:
         with envelope_path.open('w', encoding='utf-8') as envelope_out, stderr_path.open('w', encoding='utf-8') as stderr_out:
+            sys.stderr.write(f'DETAILS={details}\n')
+            sys.stderr.flush()
             rc = subprocess.call(
                 ['claude', '-p', '--output-format', 'json', *sys.argv[1:]],
                 stdout=envelope_out, stderr=stderr_out,

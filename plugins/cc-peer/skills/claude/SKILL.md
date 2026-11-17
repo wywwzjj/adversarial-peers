@@ -25,8 +25,6 @@ Choose the workflow from the request: adversarial or standard review, design ana
 - Review/investigation alone: request findings without file changes. Implementation requested: allow authorized changes and require a change summary and verification; do not ask for the same authorization again.
 - Check material claims against the code and report unresolved uncertainty.
 
-For long tasks, allow several minutes or run in the background if the foreground timeout is short; collect the result when complete.
-
 ## Adversarial review
 
 When asked to challenge or pressure-test a design, adapt this prompt to the target and concern:
@@ -55,7 +53,11 @@ Recover a lost ID from `DETAILS/envelope.json` (`session_id`). Only if unrecover
 
 ## Results and failures
 
-Success returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>`; failure returns nonzero without an answer or ID. Save the ID for follow-ups. Read logs for failures, ID recovery, or user requests. `DETAILS` contains `envelope.json` and `stderr.log`; failures show the last 40 stderr lines.
+Before launch, stderr announces `DETAILS=<dir>`. Success returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>`; failure returns nonzero without an answer or session ID. Save the peer ID for follow-ups.
+
+For long calls, use background execution and longer waits on the host execution handle, avoiding sleep/short-poll loops. Silence alone is no reason to cancel or restart. For progress or diagnosis, use this call's announced directory and start with concise metadata; activity does not imply imminent completion.
+
+Logs: `envelope.json` and `stderr.log`. The envelope is final output and may remain empty or incomplete while Claude runs; it is not a progress stream.
 
 - Exit 3: Claude reported `is_error`; the envelope has details. Exit 4: unusable output, missing result/ID, or nonzero child exit. Inspect `DETAILS`.
 - Requires `python3`. For authentication, run `claude` interactively once; for flag or connection problems, check `claude --help` / `claude doctor`. Network access and writes to `~/.claude` must be permitted by the host environment.

@@ -17,7 +17,7 @@ PEER_PROMPT_END
 
 Use a quoted, task-specific heredoc delimiter absent from the prompt (never `EOF`). Additional flags pass through to `agy`, except prompt/input/output/log and interactive flags owned by the wrapper. Supply the prompt only through stdin. Keep configured model, reasoning effort, and permissions unless the user requests an override.
 
-Value flags must have a nonempty value. Use `--flag=VALUE` when a value starts with `-`, and for any flag not yet recognized by the wrapper (including `--future-boolean=true`). Missing values are rejected before agy starts so a following conversation selector cannot be swallowed.
+Value flags require nonempty values. Use `--flag=VALUE` for values starting with `-` and unlisted flags (`--future-boolean=true` for a boolean).
 
 ## Task handling
 
@@ -26,8 +26,6 @@ Choose the workflow from the request: adversarial or standard review, design ana
 - Give the peer a concrete scope and the user's specific concern. For diffs, name the scope (e.g. uncommitted changes or comparison against main); let the peer collect it.
 - Review/investigation alone: request findings without file changes. Implementation requested: allow authorized changes and require a change summary and verification; do not ask for the same authorization again.
 - Check material claims against the code and report unresolved uncertainty.
-
-agy can be slow; wait patiently. Several silent minutes do not mean a hang. Use background execution for long calls; do not cancel or restart solely due to silence. There is no overall reasoning timeout. A five-second grace bounds exit after result/EOF and output draining after agy exits or stdin fails. The wrapper closes stdin on a final result and, on POSIX, cleans the process group on any failure, including result-validation failures after a zero exit.
 
 ## Adversarial review
 
@@ -57,10 +55,14 @@ Recover a lost ID from `DETAILS/envelope.json` (`conversation_id`). If interrupt
 
 ## Results and failures
 
-Success returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>`; failure returns nonzero without an answer or ID. Save the ID for follow-ups. Read logs for failures, ID recovery, or user requests. `DETAILS` contains `events.jsonl`, `envelope.json`, `agy.log`, and `stderr.log`; failures show the last 40 stderr lines.
+Before launch, stderr announces `DETAILS=<dir>`. Success returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>`; failure returns nonzero without an answer or session ID. Save the peer ID for follow-ups.
+
+For long calls, use background execution and longer waits on the host execution handle, avoiding sleep/short-poll loops. Silence alone is no reason to cancel or restart. For progress or diagnosis, use this call's announced directory and start with concise metadata; activity does not imply imminent completion.
+
+Logs: `events.jsonl`, `envelope.json`, `agy.log`, and `stderr.log`. Progress events use `event: "step_update"`; summarize `step_update` fields `step_index`, `state`, `step_type`, and `tool_name`. A step marked `DONE` is not run completion. There is no overall reasoning timeout.
 
 - Exit 2: invalid arguments, empty prompt/ID, or conflicting resume selectors.
 - Exit 3: agy reported an error; inspect the envelope. Exit 4: unusable stream/result or child failure; inspect the logs.
-- Exit 5: requested and actual conversation IDs differ. Recheck the prior ID or start fresh. The wrapper checks `init` in the same process before sending a resumed task; never bypass this guard with a direct CLI call.
-- Exit 130 / 143: interrupted by SIGINT / SIGTERM. The wrapper prints `DETAILS` and, on POSIX, stops agy and its remaining process group. Recover the ID from the logs before resuming.
+- Exit 5: resume ID mismatch; no task was sent. Recheck the ID or start fresh; never bypass the guard with a direct CLI call.
+- Exit 130 / 143: interrupted. Recover the peer ID from `DETAILS` before resuming.
 - Requires `python3` and agy stream-input support. For flags/models, use `agy --help` / `agy models`. Sign in by running `agy` interactively once. Network access and state writes (including `~/.gemini`) must be permitted by the host environment.

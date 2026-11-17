@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Single-file wrapper for `agy` (Google Antigravity CLI) used by the agy skill.
 
-Prints ONLY: the response text, a SESSION_ID=<id> line, and a DETAILS=<dir>
-line. The event stream (events.jsonl), final JSON envelope (envelope.json),
+Stdout prints ONLY: the response text, a SESSION_ID=<id> line, and a DETAILS=<dir>
+line. Stderr announces DETAILS before agy starts.
+The event stream (events.jsonl), final JSON envelope (envelope.json),
 agy's debug log (agy.log, including the resolved model), and stderr.log are
 persisted in DETAILS for on-demand inspection instead of flooding context.
 
@@ -130,19 +131,28 @@ def stop_process(process):
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, signal.SIG_IGN)
     if os.name == 'posix':
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        def signal_group(sig):
+            try:
+                os.killpg(process.pid, sig)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                # macOS can report EPERM for a group whose only member is an
+                # unreaped zombie. Reap and retry, preserving real EPERM errors.
+                if process.poll() is None:
+                    raise
+                try:
+                    os.killpg(process.pid, sig)
+                except ProcessLookupError:
+                    pass
+
+        signal_group(signal.SIGTERM)
         try:
             process.wait(timeout=4)
         except subprocess.TimeoutExpired:
             pass
         # The leader may have exited while a descendant ignored SIGTERM.
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        signal_group(signal.SIGKILL)
     elif process.poll() is None:
         process.terminate()
         try:
@@ -208,7 +218,7 @@ def main():
         usage_error('empty prompt — pipe it in via heredoc')
     prompt = prompt.rstrip('\n')
 
-    details = Path(tempfile.mkdtemp(prefix='agy-ask.'))
+    details = Path(tempfile.mkdtemp(prefix='agy-ask.', dir='/tmp' if os.name == 'posix' else None))
     events_path = details / 'events.jsonl'
     envelope_path = details / 'envelope.json'
     stderr_path = details / 'stderr.log'
@@ -220,6 +230,8 @@ def main():
     previous_handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
         with events_path.open('w', encoding='utf-8') as events_out, stderr_path.open('w', encoding='utf-8') as stderr_out:
+            sys.stderr.write(f'DETAILS={details}\n')
+            sys.stderr.flush()
             selectors = [f'--conversation={wanted}'] if wanted else []
             process = subprocess.Popen(
                 ['agy', '--print=', '--output-format=stream-json', '--input-format=stream-json',

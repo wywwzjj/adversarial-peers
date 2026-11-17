@@ -2,12 +2,14 @@
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import signal
 import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 WRAPPER = Path(__file__).resolve().parents[1] / 'plugins/agy-peer/skills/agy/scripts/agy-ask.py'
@@ -124,11 +126,16 @@ sys.exit(int(os.environ.get('AGY_TEST_EXIT', '0')))
         env = dict(self.env,
                    AGY_TEST_OUTPUT=output if isinstance(output, str) else json.dumps(output),
                    AGY_TEST_EXIT=str(exit_code))
-        return subprocess.run(['python3', str(self.script), *args], input=prompt, text=True,
-                              capture_output=True, env=env, cwd=self.workdir, timeout=timeout)
+        result = subprocess.run(['python3', str(self.script), *args], input=prompt, text=True,
+                                capture_output=True, env=env, cwd=self.workdir, timeout=timeout)
+        if 'DETAILS=' in result.stdout:
+            self.details(result)
+        return result
 
     def details(self, result):
-        return Path(result.stdout.split('DETAILS=', 1)[1].strip())
+        path = Path(result.stdout.split('DETAILS=', 1)[1].strip())
+        self.addCleanup(shutil.rmtree, path, ignore_errors=True)
+        return path
 
     def assert_failure(self, result, code):
         self.assertEqual(result.returncode, code, result.stderr)
@@ -201,6 +208,79 @@ sys.exit(int(os.environ.get('AGY_TEST_EXIT', '0')))
                 self.assert_failure(self.run_wrapper(*args), 5)
                 self.assertEqual(json.loads(self.capture.read_text())['stdin'], '')
                 self.assertFalse(self.side_effect.exists())
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'WNOWAIT'),
+                         'requires POSIX waitid without reaping')
+    def test_wrong_resume_preserves_exit_code_when_cleanup_hits_zombie_group(self):
+        # Force the child to exit after the stream loop's last poll. Emulate
+        # macOS EPERM for its unreaped process group on other POSIX hosts too.
+        driver = '''
+import errno, os, runpy, sys
+namespace = runpy.run_path(sys.argv.pop(1))
+main = namespace['main']
+stop_process = namespace['stop_process']
+killpg = os.killpg
+def stop_after_exit(process):
+    process.kill()
+    os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+    def zombie_killpg(pgid, sig):
+        if pgid == process.pid and process.returncode is None:
+            raise PermissionError(errno.EPERM, 'unreaped process group')
+        return killpg(pgid, sig)
+    os.killpg = zombie_killpg
+    try:
+        stop_process(process)
+        assert process.returncode is not None, 'child was not reaped'
+    finally:
+        os.killpg = killpg
+        process.wait()
+main.__globals__['stop_process'] = stop_after_exit
+sys.exit(main())
+'''
+        env = dict(self.env, AGY_TEST_OUTPUT=json.dumps({
+            'status': 'SUCCESS', 'response': 'ANSWER', 'conversation_id': 'session-1',
+        }))
+        r = subprocess.run(['python3', '-c', driver, str(self.script), '--conversation=missing'],
+                           input='Review this.\n', text=True, capture_output=True,
+                           env=env, cwd=self.workdir, timeout=5)
+        self.assert_failure(r, 5)
+        self.assertIn('was not resumed', r.stderr)
+        self.assertEqual(json.loads(self.capture.read_text())['stdin'], '')
+        self.assertFalse(self.side_effect.exists())
+        self.assertTrue((self.details(r) / 'events.jsonl').exists())
+
+    @unittest.skipUnless(os.name == 'posix', 'requires POSIX process groups')
+    def test_cleanup_does_not_suppress_genuine_permission_errors(self):
+        stop_process = runpy.run_path(str(self.script))['stop_process']
+        # A live leader must not hide EPERM; nor may an exited leader hide
+        # EPERM that persists after reaping (e.g. from surviving descendants).
+        for returncode in (None, 0):
+            with self.subTest(returncode=returncode):
+                process = mock.Mock(pid=12345)
+                process.poll.return_value = returncode
+                handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+                try:
+                    with mock.patch.object(os, 'killpg', side_effect=PermissionError('denied')):
+                        with self.assertRaises(PermissionError):
+                            stop_process(process)
+                finally:
+                    for sig, handler in handlers.items():
+                        signal.signal(sig, handler)
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'WNOWAIT'),
+                         'requires POSIX waitid without reaping')
+    def test_cleanup_reaps_exited_process_with_native_signals(self):
+        stop_process = runpy.run_path(str(self.script))['stop_process']
+        handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        process = subprocess.Popen(['python3', '-c', 'pass'], start_new_session=True)
+        try:
+            os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+            stop_process(process)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            process.wait()
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
 
     def test_pre_init_error_envelope_exits_3_and_saves_envelope(self):
         # Real agy emits a result ERROR event without init on invalid --model / --effort.

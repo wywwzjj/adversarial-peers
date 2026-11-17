@@ -95,6 +95,10 @@ Recover a missing ID from the prior call's `DETAILS` directory. Most-recent sele
 
 Every wrapper returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>` on success. Full output and stderr stay in the details directory for inspection when needed. Failed calls return a nonzero exit status and withhold the answer and session ID; logs remain available. See each skill for its CLI-specific error codes.
 
+Log directories use `/tmp/<peer>-ask.<random>` on POSIX systems and the system temporary directory elsewhere. Each call has its own directory; the wrapper retains it for inspection.
+
+Before launch, stderr announces `DETAILS=<dir>`. Wait through the host execution handle; the peer session ID is for follow-ups. Prefer longer waits over sleep/short-poll loops. For progress or diagnosis, use the announced directory and start with concise metadata. Silence does not establish a hang, and activity does not imply imminent completion. Each skill describes its agent's log format.
+
 The wrappers add no model, effort, sandbox, or tool restrictions. Agents need network access and access to their local state directories, such as `~/.codex`, `~/.claude`, or `~/.gemini`. Use the host's normal permission flow and the user's configured environment.
 
 ## Skill paths
@@ -138,7 +142,7 @@ Run the wrapper regression suite without calling a model:
 python3 -m unittest discover -s tests -v
 ```
 
-The 50 tests cover the shared success/failure contract, literal and large-payload prompt forwarding, configured defaults and explicit overrides, log preservation, pre- and post-init error envelopes, malformed/empty output, nonzero child exits, and Codex event-error summaries when stderr is empty. agy-specific tests also cover single-file layout, pre-send resume-ID validation, malformed/missing handshakes, argument conflicts, missing-value rejection, inherited stdout with and without a final result, concurrent large input/output, error-result preservation after a broken stdin, closing stdin for pre-init errors, process-group cleanup after result-validation failures, bounded exit cleanup, SIGINT/SIGTERM process-group cleanup, and proof that a mismatched session receives no task. Tests use fake CLIs and installed-style paths containing spaces, without host path variables.
+The tests cover the shared success/failure contract, literal and large-payload prompt forwarding, configured defaults and explicit overrides, log preservation, pre- and post-init error envelopes, malformed/empty output, nonzero child exits, and Codex event-error summaries when stderr is empty. agy-specific tests also cover single-file layout, pre-send resume-ID validation, malformed/missing handshakes, argument conflicts, missing-value rejection, inherited stdout with and without a final result, concurrent large input/output, error-result preservation after a broken stdin, closing stdin for pre-init errors, process-group cleanup after result-validation failures, macOS zombie-group EPERM recovery without suppressing genuine permission errors, bounded exit cleanup, SIGINT/SIGTERM process-group cleanup, and proof that a mismatched session receives no task. Tests use fake CLIs and installed-style paths containing spaces, without host path variables.
 
 agy reviews can be slow: a live review with the configured High model completed nine minutes after resuming. Allow long tasks to finish and use background execution when foreground tools have short timeouts. Several minutes without output is not evidence of a hang; the wrapper adds no overall reasoning deadline.
 
@@ -146,7 +150,7 @@ Live checks on 2026-11-17 installed `agy-peer` with Codex v0.169.0 in an isolate
 
 **Previously verified CLIs**: Codex v0.142.2 / v0.145.0 for base commands and JSON events, v0.169.0 for plugin installation/discovery; Claude Code v2.1.206; agy v1.5.5 for original behavior checks and v1.5.9 / v1.5.10 for stream-json invocation and resume. For other versions, consult the CLI's own help.
 
-**Plugin versions**: codex-peer 1.0.1 · cc-peer 1.0.0 · agy-peer 1.0.0
+**Plugin versions**: codex-peer 1.0.2 · cc-peer 1.0.1 · agy-peer 1.0.2
 
 **Runtime dependency**: `python3`
 

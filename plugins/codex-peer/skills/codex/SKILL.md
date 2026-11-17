@@ -25,8 +25,6 @@ Choose the workflow from the request: adversarial or standard review, design ana
 - Review/investigation alone: request findings without file changes. Implementation requested: allow authorized changes and require a change summary and verification; do not ask for the same authorization again.
 - Check material claims against the code and report unresolved uncertainty.
 
-For long tasks, allow several minutes or run in the background if the foreground timeout is short; collect the result when complete.
-
 ## Adversarial review
 
 When asked to challenge or pressure-test a design, adapt this prompt to the target and concern:
@@ -55,7 +53,11 @@ Recover a lost ID from `DETAILS/events.jsonl` (`thread.started.thread_id`). Only
 
 ## Results and failures
 
-Success returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>`; failure returns nonzero without an answer or ID. Save the ID for follow-ups. Read logs for failures, ID recovery, or user requests. `DETAILS` contains `events.jsonl` and `stderr.log`; failures show the error message from an `error` / `turn.failed` event when available, followed by the last 40 stderr lines.
+Before launch, stderr announces `DETAILS=<dir>`. Success returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>`; failure returns nonzero without an answer or session ID. Save the peer ID for follow-ups.
+
+For long calls, use background execution and longer waits on the host execution handle, avoiding sleep/short-poll loops. Silence alone is no reason to cancel or restart. For progress or diagnosis, use this call's announced directory and start with concise metadata; activity does not imply imminent completion.
+
+Logs: `events.jsonl` and `stderr.log`. Progress metadata: event `type`, plus `item.type` / `item.status` when present. Failures include an available event error and stderr tail.
 
 - Exit 3: child failure, error event, or no final answer. Exit 4: malformed events or missing thread ID. Inspect `DETAILS`.
 - `Not inside a trusted directory`: run in the repository or pass `--skip-git-repo-check`.

@@ -2,9 +2,11 @@
 import json
 import os
 from pathlib import Path
+import queue
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 
 
@@ -45,7 +47,7 @@ class PeerWrapperTests(unittest.TestCase):
         for peer, plugin in PLUGINS.items():
             fake = self.bin / peer
             fake.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, sys
+import json, os, pathlib, sys, time
 out = os.environ['PEER_TEST_OUTPUT']
 if '--input-format=stream-json' in sys.argv:
     lines = out.splitlines(keepends=True)
@@ -63,6 +65,9 @@ else:
 pathlib.Path(os.environ['PEER_TEST_CAPTURE']).write_text(json.dumps({
     'argv': sys.argv[1:], 'stdin': stdin, 'cwd': os.getcwd(),
 }))
+gate = os.environ.get('PEER_TEST_WAIT_FILE')
+while gate and not pathlib.Path(gate).exists():
+    time.sleep(0.01)
 sys.stdout.write(rest)
 sys.stderr.write(os.environ.get('PEER_TEST_STDERR', 'fake peer diagnostic\\n'))
 sys.exit(int(os.environ['PEER_TEST_EXIT']))
@@ -76,11 +81,16 @@ sys.exit(int(os.environ['PEER_TEST_EXIT']))
     def run_peer(self, peer, *args, output=None, status=0, prompt='Review this.\n'):
         env = dict(self.env, PEER_TEST_OUTPUT=success(peer) if output is None else output,
                    PEER_TEST_EXIT=str(status))
-        return subprocess.run(['python3', str(self.scripts[peer]), *args], input=prompt,
-                              text=True, capture_output=True, env=env, cwd=self.workdir, timeout=10)
+        result = subprocess.run(['python3', str(self.scripts[peer]), *args], input=prompt,
+                                text=True, capture_output=True, env=env, cwd=self.workdir, timeout=10)
+        if 'DETAILS=' in result.stdout:
+            self.details(result)
+        return result
 
     def details(self, result):
-        return Path(result.stdout.split('DETAILS=', 1)[1].strip())
+        path = Path(result.stdout.split('DETAILS=', 1)[1].strip())
+        self.addCleanup(shutil.rmtree, path, ignore_errors=True)
+        return path
 
     def assert_failure(self, result):
         self.assertNotEqual(result.returncode, 0)
@@ -98,6 +108,9 @@ sys.exit(int(os.environ['PEER_TEST_EXIT']))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(result.stdout.startswith('ANSWER\n\nSESSION_ID=session-1\nDETAILS='))
                 details = self.details(result)
+                if os.name == 'posix':
+                    self.assertEqual(details.parent, Path('/tmp'))
+                self.assertEqual(result.stderr, f'DETAILS={details}\n')
                 log = 'envelope.json' if peer == 'claude' else 'events.jsonl'
                 self.assertEqual((details / log).read_text(), success(peer))
                 self.assertIn('fake peer diagnostic', (details / 'stderr.log').read_text())
@@ -115,6 +128,49 @@ sys.exit(int(os.environ['PEER_TEST_EXIT']))
                 self.assertNotIn('--model', call['argv'])
                 self.assertNotIn('--effort', call['argv'])
                 self.assertNotIn('--sandbox', call['argv'])
+
+    def test_log_directory_is_available_before_peer_finishes(self):
+        for peer in PLUGINS:
+            with self.subTest(peer=peer):
+                gate = self.root / (peer + '.release')
+                env = dict(self.env, PEER_TEST_OUTPUT=success(peer), PEER_TEST_EXIT='0',
+                           PEER_TEST_WAIT_FILE=str(gate))
+                process = subprocess.Popen(['python3', str(self.scripts[peer])],
+                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, text=True, cwd=self.workdir, env=env)
+                process.stdin.write('Review this.\n')
+                process.stdin.close()
+                process.stdin = None
+                announcements = queue.Queue()
+
+                def read_announcement():
+                    announcements.put(process.stderr.readline())
+
+                reader = threading.Thread(target=read_announcement, daemon=True)
+                reader.start()
+                try:
+                    try:
+                        line = announcements.get(timeout=3)
+                    except queue.Empty:
+                        self.fail('wrapper did not announce its directory while the peer was running')
+                    self.assertIsNone(process.poll())
+                    self.assertTrue(line.startswith('DETAILS='), line)
+                    directory = Path(line.strip().removeprefix('DETAILS='))
+                    self.assertTrue(directory.is_dir())
+                    gate.write_text('finish')
+                    reader.join(timeout=3)
+                    stdout, stderr = process.communicate(timeout=5)
+                    self.assertEqual(process.returncode, 0, stderr)
+                    self.assertTrue(stdout.startswith('ANSWER\n\nSESSION_ID=session-1\nDETAILS='))
+                    self.assertEqual(self.details(subprocess.CompletedProcess([], 0, stdout, stderr)), directory)
+                finally:
+                    gate.write_text('finish')
+                    reader.join(timeout=3)
+                    try:
+                        process.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.communicate(timeout=5)
 
     def test_explicit_model_override_is_forwarded(self):
         for peer in PLUGINS:

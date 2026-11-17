@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Single-file wrapper for `codex exec --json` used by the codex skill.
 
-Prints ONLY: the final agent message, a SESSION_ID=<id> line, and a
+Stdout prints ONLY: the final agent message, a SESSION_ID=<id> line, and a
 DETAILS=<dir> line. Full JSONL events (`events.jsonl`: reasoning summaries,
 command executions, token usage) and `stderr.log` are persisted in DETAILS for
-on-demand inspection instead of flooding context.
+on-demand inspection instead of flooding context. Stderr announces DETAILS before launch.
 
 Usage (flags pass through to `codex exec` verbatim):
     python3 codex-ask.py <<'PEER_PROMPT_END'
@@ -21,6 +21,7 @@ Failed calls emit neither an answer nor SESSION_ID.
 Requires: codex CLI with `codex exec --json` (verified v0.145.0), Python 3.9+.
 """
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -40,12 +41,14 @@ def report_failure(details, stderr_path, message, code):
 
 
 def main():
-    details = Path(tempfile.mkdtemp(prefix='codex-ask.'))
+    details = Path(tempfile.mkdtemp(prefix='codex-ask.', dir='/tmp' if os.name == 'posix' else None))
     events_path = details / 'events.jsonl'
     stderr_path = details / 'stderr.log'
 
     try:
         with events_path.open('w', encoding='utf-8') as events_out, stderr_path.open('w', encoding='utf-8') as stderr_out:
+            sys.stderr.write(f'DETAILS={details}\n')
+            sys.stderr.flush()
             rc = subprocess.call(
                 ['codex', 'exec', '--json', *sys.argv[1:]],
                 stdout=events_out, stderr=stderr_out,
