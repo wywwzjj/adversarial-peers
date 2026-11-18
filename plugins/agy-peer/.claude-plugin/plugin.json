@@ -1,7 +1,7 @@
 {
   "name": "agy-peer",
   "description": "Invoke Antigravity CLI (agy / Gemini) as a peer coding agent when explicitly requested, or clearly continuing an existing agy session. Review, design, debugging, and delegated tasks.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": {
     "name": "wywwzjj"
   },

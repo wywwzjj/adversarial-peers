@@ -8,7 +8,7 @@ Peer coding agents for adversarial / steerable review, design discussion, debugg
 | `cc-peer` | Claude Code | `claude -p` | `claude` |
 | `agy-peer` | Antigravity / Gemini | `agy --print` | `agy` |
 
-Choose the agent explicitly, then choose the workflow by task fit. Each agent uses its configured model, reasoning effort, and permissions unless the user requests an override.
+Choose the agent explicitly, then choose the workflow by task fit. Each agent uses its configured defaults. The agy skill can choose a faster model for focused checks. Explicit user overrides take precedence.
 
 ## Installation
 
@@ -75,7 +75,7 @@ All three agents support the same workflows. These examples use different agents
 
 Adversarial review is the flagship workflow: name a specific design choice or risk area for the peer to challenge. For a diff-scoped review, name the scope, such as “uncommitted changes” or “the diff against main”; the peer collects the diff itself.
 
-The skill activates only when the user selects the agent, directly invokes the skill, or clearly continues an existing call. A generic review request, a mention of an agent as a topic, or an ambiguous “continue” does not choose a peer.
+The skill activates only when the user selects the agent, directly invokes the skill, or clearly continues an existing call.
 
 Give the peer the target, context, constraints, expected output, and whether edits are authorized. Review and investigation requests return findings without changing files. An implementation request authorizes the peer to make the requested changes and verify them. The caller assesses the result and reports material uncertainty.
 
@@ -87,17 +87,17 @@ A follow-up such as “Continue that review — also check rollback under partia
 |-------|-----------------|--------------------------|----------|
 | Codex | `resume <SESSION_ID>` | Inherits the session's model and reasoning effort | `events.jsonl`: `thread.started.thread_id` |
 | Claude Code | `--resume <SESSION_ID>` | Inherits the model; pass effort explicitly to override | `envelope.json`: `session_id` |
-| Antigravity | `--conversation <SESSION_ID>` | Re-pass explicit model / effort overrides | `envelope.json`: `conversation_id` |
+| Antigravity | `--conversation <SESSION_ID>` | Re-pass model / effort overrides | `envelope.json`: `conversation_id` |
 
-Recover a missing ID from the prior call's `DETAILS` directory. Most-recent selectors (`--last` / `--continue`) are last resorts because they can select another concurrent call. The agy wrapper verifies the requested ID in the same process before sending the resumed task; an unknown ID or unsupported handshake fails without sending it.
+Recover a missing ID from the prior call's `DETAILS` directory. Avoid most-recent selectors (`--last` / `--continue`), which can select another concurrent call. The agy wrapper verifies the requested ID before sending the resumed task. Exit 5 at `init` blocks delivery. Exit 5 at the result stage occurs after delivery. Recover the ID from an earlier verified call for that session and check what the peer did before resending after a result mismatch.
 
 ### Results and permissions
 
-Every wrapper returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>` on success. Full output and stderr stay in the details directory for inspection when needed. Failed calls return a nonzero exit status and withhold the answer and session ID; logs remain available. See each skill for its CLI-specific error codes.
+Every wrapper returns the answer, `SESSION_ID=<id>`, and `DETAILS=<dir>` on success. Full output and stderr stay in the details directory for inspection when needed. Failed calls return a nonzero exit status and withhold the answer and session ID; logs remain available. Error codes are documented in each wrapper script's header.
 
 Log directories use `/tmp/<peer>-ask.<random>` on POSIX systems and the system temporary directory elsewhere. Each call has its own directory; the wrapper retains it for inspection.
 
-Before launch, stderr announces `DETAILS=<dir>`. Wait through the host execution handle; the peer session ID is for follow-ups. Prefer longer waits over sleep/short-poll loops. For progress or diagnosis, use the announced directory and start with concise metadata. Silence does not establish a hang, and activity does not imply imminent completion. Each skill describes its agent's log format.
+Before launch, stderr announces `DETAILS=<dir>`. Wait through the host execution handle; the peer session ID is for follow-ups. Prefer longer waits over sleep/short-poll loops. Inspect the announced directory as needed. Silence does not establish a hang, and activity does not imply imminent completion.
 
 The wrappers add no model, effort, sandbox, or tool restrictions. Agents need network access and access to their local state directories, such as `~/.codex`, `~/.claude`, or `~/.gemini`. Use the host's normal permission flow and the user's configured environment.
 
@@ -132,7 +132,7 @@ tests/
 └── test_agy_ask.py
 ```
 
-Each `SKILL.md` is the authoritative workflow reference for that agent's invocation, resume rules, and common errors. The marketplace provides one plugin per agent using the same manifest layout.
+Each `SKILL.md` defines that agent's calling and resume workflow. The marketplace provides one plugin per agent using the same manifest layout.
 
 ## Verification
 
@@ -150,7 +150,7 @@ Live checks on 2026-11-17 installed `agy-peer` with Codex v0.169.0 in an isolate
 
 **Previously verified CLIs**: Codex v0.142.2 / v0.145.0 for base commands and JSON events, v0.169.0 for plugin installation/discovery; Claude Code v2.1.206; agy v1.5.5 for original behavior checks and v1.5.9 / v1.5.10 for stream-json invocation and resume. For other versions, consult the CLI's own help.
 
-**Plugin versions**: codex-peer 1.0.2 · cc-peer 1.0.1 · agy-peer 1.0.2
+**Plugin versions**: codex-peer 1.0.3 · cc-peer 1.0.2 · agy-peer 1.0.3
 
 **Runtime dependency**: `python3`
 

@@ -8,10 +8,10 @@ agy's debug log (agy.log, including the resolved model), and stderr.log are
 persisted in DETAILS for on-demand inspection instead of flooding context.
 
 Both fresh and resumed calls run over stream-json input/output with `--print=`:
-    python3 agy-ask.py <<'PEER_PROMPT_END'
+    python3 agy-ask.py <<'PROMPT'
     multi-line prompt
-    PEER_PROMPT_END
-    python3 agy-ask.py --conversation <SESSION_ID> <<'PEER_PROMPT_END' ...
+    PROMPT
+    python3 agy-ask.py --conversation <SESSION_ID> <<'PROMPT' ...
 
 Reading the prompt from STDIN and sending it as NDJSON after `init` avoids:
   - `-p` swallowing the next flag as the prompt or merging piped stdin;
@@ -334,7 +334,10 @@ def main():
                 if not isinstance(res, str) or not res.strip() or not isinstance(sid, str) or not sid.strip():
                     raise Failure('malformed envelope: missing response or conversation_id (see envelope.json in DETAILS)')
                 if wanted and sid != wanted:
-                    raise Failure(f'result conversation ID ({sid!r}) does not match {wanted}; answer withheld', 5)
+                    raise Failure(
+                        f'result conversation ID ({sid!r}) does not match {wanted}; task was sent; answer withheld',
+                        5,
+                    )
                 if init_id and sid != init_id:
                     raise Failure(f'result conversation ID ({sid!r}) does not match init ID ({init_id!r}); answer withheld')
                 completed = True

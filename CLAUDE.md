@@ -12,7 +12,7 @@ This repository is a **peer-agent marketplace** (`adversarial-peers`) holding th
 
 All plugins provide the same responsibilities through different agents: flagship use case is **adversarial / steerable code review**, plus standard review, deep design analysis, debugging investigations, and delegated tasks.
 
-No skill pins a model, reasoning effort, or permissions — each relies on the callee CLI's configured defaults unless the user requests an override. This avoids per-release maintenance churn.
+Skills use the callee CLI's configured defaults. The agy skill can choose a faster model for focused checks. Explicit user overrides take precedence.
 
 **One plugin per callee**: install the agents you want to call (`codex-peer`, `cc-peer`, `agy-peer` — note `cc-peer` uses `cc` because Anthropic's plugin validator reserves the `claude-` prefix). Both hosts read `.claude-plugin/marketplace.json` / `plugin.json`; no duplicated Codex manifest is needed. Codex plugin installation and discovery are verified against v0.169.0.
 
@@ -54,11 +54,12 @@ adversarial-peers/                    # Marketplace root
 The skill's default path is `plugins/codex-peer/skills/codex/scripts/codex-ask.py`, which wraps `codex exec --json` (verified v0.145.0):
 
 ```bash
-python3 "<skill-dir>/scripts/codex-ask.py" <<'PEER_PROMPT_END'
-Multi-line prompt (heredoc is the default form; delimiter is PEER_PROMPT_END, never EOF —
-reviewed diffs often contain a bare EOF line, which would break out of the heredoc)
-PEER_PROMPT_END
+python3 "<skill-dir>/scripts/codex-ask.py" <<'PROMPT'
+Multi-line prompt
+PROMPT
 ```
+
+Use `PROMPT` by default for all three wrappers. If the prompt contains a line consisting exactly of `PROMPT`, choose another quoted delimiter and update the closing line to match.
 
 Design rationale (the script encodes what the old inline chain did by prose):
 - **Context economy**: stdout carries only the final agent message + `SESSION_ID=<id>` + `DETAILS=<dir>`. Reasoning summaries, command executions, and token stats never enter the caller's context.
@@ -66,15 +67,15 @@ Design rationale (the script encodes what the old inline chain did by prose):
 - **Structured session ID**: taken from the `thread.started` event. It is emitted only after a successful child exit and valid non-empty final message; recover it later from `events.jsonl` if needed.
 - `codex exec` only — plain `codex` is interactive and fails with "stdout is not a terminal". Long high-reasoning runs can exceed a 2-minute foreground timeout — run in the background.
 
-The wrapper requires `codex exec --json` and python3. It reads the saved stream line by line after the child exits, and withholds the answer and session ID on a nonzero child exit, error event, malformed stream, or missing/empty result or ID.
+The wrapper requires `codex exec --json` and Python 3. It reads the saved stream line by line after the child exits. It withholds the answer and session ID on a nonzero exit, failed turn, unresolved error, malformed stream, or missing or empty result or ID. `turn.completed` clears preceding reconnect notices.
 
 ### Resume by session ID, not `--last`
 `codex exec resume --last` resumes the most recent recorded session — cwd-filtered but still racing with any other Codex call in the same repo (parallel reviews, the user invoking Codex directly). Resume with the captured ID through the same script:
 
 ```bash
-python3 "<skill-dir>/scripts/codex-ask.py" resume <SESSION_ID> <<'PEER_PROMPT_END'
+python3 "<skill-dir>/scripts/codex-ask.py" resume <SESSION_ID> <<'PROMPT'
 follow-up prompt
-PEER_PROMPT_END
+PROMPT
 ```
 
 Resume inherits the original session's model and reasoning effort; override `-m`/`-c model_reasoning_effort` only to intentionally change the inherited values.
@@ -89,14 +90,14 @@ All live-verified against claude 2.1.206; the traps mirror the Codex ones almost
 - **Maintainer decision (2026-07): the skills impose NO restriction flags** — no `--tools`, no `--safe-mode` on the Claude side, no `-s` pin on the Codex side. Both CLIs run with the user's configured defaults; restrictions had real side effects (read-only sandbox blocks network/temp writes; `--tools` removes Bash so Claude can't collect diffs; `--safe-mode` blocks the repo's CLAUDE.md/skills/MCP that help reviews). Keep it simple — don't re-add them when tracking CLI updates. For the record, the verified facts that motivated (and then un-motivated) them: `-p` auto-approves workspace writes; per-invocation flags don't survive `--resume`; model **is** inherited on resume
 - **Failure is JSON too**: the script checks `is_error`, validates the envelope and non-empty result/session ID, and rejects nonzero child exits even with success-shaped JSON. Failed calls emit neither an answer nor a session ID; raw output and stderr remain in DETAILS.
 - **`--resume` needs the ID in print mode** — bare `--resume` opens an interactive picker and hangs under `-p`; `-c/--continue` is cwd-scoped-most-recent and races like Codex's `--last`
-- Multi-line prompts go via stdin heredoc with a quoted delimiter (`PEER_PROMPT_END`, never `EOF`)
+- Multi-line prompts go via stdin heredoc with a quoted delimiter (`PROMPT` by default)
 
 ## Key Technical Constraints — agy-peer
 
 Behavior traps were live-verified against agy 1.5.5; single-file `stream-json` invocation and ID-based context continuation were verified with agy 1.5.9 / 1.5.10 on 2026-11-17. Wrapper: `plugins/agy-peer/skills/agy/scripts/agy-ask.py` (single-file Python wrapper using `stream-json` input/output for both fresh and resumed calls; same output contract: answer + `SESSION_ID=` + `DETAILS=`; DETAILS holds `events.jsonl`, `envelope.json`, `agy.log` via `--log-file`, and `stderr.log`).
 
-- **`-p` takes the prompt as its value** — `agy -p --output-format json "x"` swallows `--output-format` as the prompt (exit 2), piped stdin alongside `-p` is *merged* into the prompt, and bare piped stdin without `-p` falls back to the interactive TUI when empty. The wrapper reads the prompt from stdin and sends it as a single NDJSON user message after `init` (with `--print=`), avoiding all three traps as well as OS argv length limits. Heredoc delimiter is `PEER_PROMPT_END`
-- **Unknown `--conversation <id>` does not fail** — stderr warning only, a NEW conversation starts, exit 0. Because both fresh and resumed calls run over `stream-json`, the wrapper inspects `init.conversation_id` in the same process before sending the prompt, and exits 5 without sending the task on mismatch. Note that agy creates an empty stub conversation during `init` even when aborted, so never follow Exit 5 with `-c`. Missing/unsupported stream-init support exits 4 without sending the task
+- **`-p` takes the prompt as its value** — `agy -p --output-format json "x"` swallows `--output-format` as the prompt (exit 2), piped stdin alongside `-p` is *merged* into the prompt, and bare piped stdin without `-p` falls back to the interactive TUI when empty. The wrapper reads the prompt from stdin and sends it as a single NDJSON user message after `init` (with `--print=`), avoiding all three traps as well as OS argv length limits.
+- **An unknown `--conversation <id>` starts a new conversation.** The wrapper validates `init.conversation_id` before sending the prompt. Exit 5 at `init` blocks delivery. Exit 5 at the result stage means the prompt was sent. Recover the ID from a verified call for the intended session and check what the peer did before resending after a result mismatch. Avoid `-c`, which can select the empty conversation created by a failed `init`. Missing or unsupported stream-init support exits 4 before sending the task.
 - **Resume does NOT inherit the model** — a resumed conversation runs on the configured default (verified via `agy.log`: `Propagating selected model override`); re-pass `--model`/`--effort`
 - The wrapper rejects prompt/input/output/log and interactive overrides (including Go-style single-dash aliases), empty/repeated IDs and conflicting resume selectors, non-object JSON, and empty responses, and withholds answers/session IDs on a nonzero child exit even if its envelope says SUCCESS
 - Errors are JSON too: `status: "ERROR"` + `error`, exit 1 (including pre-`init` failures such as unknown `--model` or invalid `--effort` on fresh or resumed calls) → `envelope.json` saved and wrapper exit 3; unknown CLI flags print usage with no JSON → exit 4

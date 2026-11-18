@@ -6,11 +6,13 @@ line. The full JSON envelope (`envelope.json`: usage, cost, permission_denials,
 model info) and `stderr.log` are persisted in DETAILS for on-demand inspection
 instead of flooding context. Stderr announces DETAILS before launch.
 
-Usage (flags pass through to `claude -p` verbatim):
-    python3 claude-ask.py <<'PEER_PROMPT_END'
+Usage:
+    python3 claude-ask.py <<'PROMPT'
     multi-line prompt
-    PEER_PROMPT_END
-    python3 claude-ask.py --resume <SESSION_ID> <<'PEER_PROMPT_END' ...
+    PROMPT
+    python3 claude-ask.py --resume <SESSION_ID> <<'PROMPT' ...
+
+Flags pass through to `claude -p` verbatim.
 
 Exit codes:
   0  success

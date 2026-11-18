@@ -419,7 +419,9 @@ sys.exit(main())
     def test_result_id_mismatch_is_rejected(self):
         self.env['AGY_TEST_INIT_ID'] = 'session-1'
         result = {'status': 'SUCCESS', 'response': 'ANSWER', 'conversation_id': 'other-session'}
-        self.assert_failure(self.run_wrapper('--conversation=session-1', output=result), 5)
+        mismatch = self.run_wrapper('--conversation=session-1', output=result)
+        self.assert_failure(mismatch, 5)
+        self.assertIn('task was sent', mismatch.stderr)
         self.assert_failure(self.run_wrapper(output=result), 4)
 
     def test_resume_nonzero_child_exit_withholds_answer(self):

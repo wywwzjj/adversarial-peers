@@ -6,15 +6,17 @@ DETAILS=<dir> line. Full JSONL events (`events.jsonl`: reasoning summaries,
 command executions, token usage) and `stderr.log` are persisted in DETAILS for
 on-demand inspection instead of flooding context. Stderr announces DETAILS before launch.
 
-Usage (flags pass through to `codex exec` verbatim):
-    python3 codex-ask.py <<'PEER_PROMPT_END'
+Usage:
+    python3 codex-ask.py <<'PROMPT'
     multi-line prompt
-    PEER_PROMPT_END
-    python3 codex-ask.py resume <SESSION_ID> <<'PEER_PROMPT_END' ...
+    PROMPT
+    python3 codex-ask.py resume <SESSION_ID> <<'PROMPT' ...
+
+Flags pass through to `codex exec` verbatim.
 
 Exit codes:
   0  success
-  3  child failure, error event, or no final non-empty agent message
+  3  child failure, failed turn, unresolved error, or no final non-empty agent message
   4  malformed event stream, missing thread ID, or failed CLI launch
 
 Failed calls emit neither an answer nor SESSION_ID.
@@ -58,41 +60,53 @@ def main():
 
     child_failure = f'codex exited {rc}; answer withheld (see DETAILS)'
     sid = last = None
+    pending_error = None
+    turn_failure = None
+    stream_error = None
     try:
         with events_path.open(encoding='utf-8', errors='replace') as events:
             for line in events:  # Streaming: never accumulate the event stream.
-                e = json.loads(line)
-                if not isinstance(e, dict):
+                event = json.loads(line)
+                if not isinstance(event, dict):
                     raise ValueError('expected a JSON object')
-                if e.get('type') in ('error', 'turn.failed'):
-                    summary = 'codex reported an error'
-                    if rc != 0:
-                        summary += f' (exit {rc})'
-                    for value in (e.get('error'), e.get('message')):
-                        if isinstance(value, dict):
-                            value = value.get('message')
-                        if isinstance(value, str) and value.strip():
-                            summary += f': {value.strip()}'
-                            break
-                    return report_failure(
-                        details, stderr_path,
-                        f'{summary}; answer withheld (see events.jsonl in DETAILS)', 3,
-                    )
-                if e.get('type') == 'thread.started':
-                    sid = e.get('thread_id')
-                elif e.get('type') == 'item.completed':
-                    item = e.get('item')
+                event_type = event.get('type')
+                if event_type == 'turn.failed':
+                    turn_failure = event
+                elif event_type == 'error':
+                    pending_error = event
+                elif event_type == 'turn.completed':
+                    # The CLI emits recoverable reconnect notices as error events.
+                    pending_error = None
+                elif event_type == 'thread.started':
+                    sid = event.get('thread_id')
+                elif event_type == 'item.completed':
+                    item = event.get('item')
                     if not isinstance(item, dict):
                         raise ValueError('expected an item object')
                     if item.get('type') == 'agent_message':
                         last = item.get('text')
     except (OSError, ValueError) as exc:
-        if rc != 0:
-            return report_failure(details, stderr_path, child_failure, 3)
-        return report_failure(details, stderr_path, f'malformed event stream: {exc} (see DETAILS)', 4)
+        stream_error = exc
 
+    reported_error = turn_failure or pending_error
+    if reported_error is not None:
+        summary = 'codex reported an error'
+        if rc != 0:
+            summary += f' (exit {rc})'
+        for value in (reported_error.get('error'), reported_error.get('message')):
+            if isinstance(value, dict):
+                value = value.get('message')
+            if isinstance(value, str) and value.strip():
+                summary += f': {value.strip()}'
+                break
+        return report_failure(
+            details, stderr_path,
+            f'{summary}; answer withheld (see events.jsonl in DETAILS)', 3,
+        )
     if rc != 0:
         return report_failure(details, stderr_path, child_failure, 3)
+    if stream_error is not None:
+        return report_failure(details, stderr_path, f'malformed event stream: {stream_error} (see DETAILS)', 4)
     if not isinstance(last, str) or not last.strip():
         return report_failure(details, stderr_path, 'no final agent message (see DETAILS)', 3)
     if not isinstance(sid, str) or not sid.strip():

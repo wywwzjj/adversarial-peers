@@ -247,6 +247,31 @@ sys.exit(int(os.environ['PEER_TEST_EXIT']))
             with self.subTest(peer=peer):
                 self.assert_failure(self.run_peer(peer, output=output))
 
+    def test_codex_returns_answer_after_successful_reconnect(self):
+        events = success('codex').splitlines(keepends=True)
+        notice = json.dumps({'type': 'error', 'message': 'Reconnecting... 1/5 (stream disconnected)'})
+        events.insert(1, notice + '\n')
+        output = ''.join(events)
+
+        result = self.run_peer('codex', output=output)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith('ANSWER\n\nSESSION_ID=session-1\nDETAILS='))
+        self.assertEqual((self.details(result) / 'events.jsonl').read_text(), output)
+
+    def test_codex_reports_terminal_failure_after_reconnect(self):
+        output = '\n'.join(map(json.dumps, (
+            {'type': 'thread.started', 'thread_id': 'session-1'},
+            {'type': 'error', 'message': 'Reconnecting... 1/5 (stream disconnected)'},
+            {'type': 'turn.failed', 'error': {'message': 'request rejected'}},
+        ))) + '\n'
+
+        result = self.run_peer('codex', output=output, status=1)
+
+        self.assert_failure(result)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn('request rejected', result.stderr)
+
     def test_codex_uses_final_message_without_exposing_tool_output(self):
         output = '\n'.join(map(json.dumps, (
             {'type': 'thread.started', 'thread_id': 'session-1'},
